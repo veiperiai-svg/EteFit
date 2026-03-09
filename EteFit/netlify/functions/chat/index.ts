@@ -86,6 +86,7 @@ Guidelines:
           },
           ...messages,
         ],
+        stream: false
       }),
     });
 
