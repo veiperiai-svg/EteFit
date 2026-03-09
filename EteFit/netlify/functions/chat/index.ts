@@ -92,10 +92,13 @@ Guidelines:
 
     const data = await response.json();
 console.log("OpenAI API response:", data);
+
+const answer = data.choices?.[0]?.message?.content || "No answer from AI";
+
     return {
       statusCode: 200,
       headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-      body: JSON.stringify(data),
+      body: JSON.stringify(answer),
     };
   } catch (e: any) {
     console.error("chat error:", e);
