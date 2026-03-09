@@ -1,73 +1,31 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { Handler } from "@netlify/functions";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
-
-serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
-
+const handler: Handler = async (event, context) => {
   try {
-    const { messages, userProfile, generateTitle } = await req.json();
-    const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
+    if (event.httpMethod === "OPTIONS") {
+      return {
+        statusCode: 200,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        },
+      };
+    }
+
+    const body = event.body ? JSON.parse(event.body) : {};
+    const { messages, userProfile, generateTitle } = body;
+
+    const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
     if (!OPENAI_API_KEY) throw new Error("OPENAI_API_KEY is not configured");
 
-    // Title generation mode — quick non-streaming call
+    // Title generation (greitas ne-streaming)
     if (generateTitle && messages?.length >= 2) {
       const convoSnippet = messages
         .slice(0, 4)
-        .map((m: { role: string; content: string }) => `${m.role}: ${m.content.slice(0, 200)}`)
+        .map((m: any) => `${m.role}: ${m.content.slice(0, 200)}`)
         .join("\n");
 
-      const titleResp = await fetch(
-        "https://api.openai.com/v1/chat/completions",
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${OPENAI_API_KEY}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            model: "gpt-4",
-            messages: [
-              {
-                role: "system",
-                content:
-                  "Generate a short title (max 5 words) for this fitness chat conversation. Return ONLY the title, nothing else. No quotes, no punctuation at the end.",
-              },
-              {
-                role: "user",
-                content: convoSnippet,
-              },
-            ],
-          }),
-        }
-      );
-
-      if (!titleResp.ok) {
-        return new Response(
-          JSON.stringify({ title: messages[0]?.content?.slice(0, 40) || "Chat" }),
-          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      const titleData = await titleResp.json();
-      const title = titleData.choices?.[0]?.message?.content?.trim() || messages[0]?.content?.slice(0, 40) || "Chat";
-
-      return new Response(
-        JSON.stringify({ title }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // Normal chat streaming
-    const response = await fetch(
-      "https://api.openai.com/v1/chat/completions",
-      {
+      const titleResp = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${OPENAI_API_KEY}`,
@@ -76,15 +34,40 @@ serve(async (req) => {
         body: JSON.stringify({
           model: "gpt-4",
           messages: [
-            {
-              role: "system",
-              content: `You are EteFit, an expert AI fitness and health coach. You provide personalized, evidence-based advice on:
+            { role: "system", content: "Generate a short title (max 5 words). Return only the title." },
+            { role: "user", content: convoSnippet },
+          ],
+        }),
+      });
+
+      const titleData = await titleResp.json();
+      const title = titleData.choices?.[0]?.message?.content?.trim() || messages[0]?.content?.slice(0, 40) || "Chat";
+
+      return {
+        statusCode: 200,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+        body: JSON.stringify({ title }),
+      };
+    }
+
+    // Normal chat (vienkartinis ne-streaming)
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "gpt-4",
+        messages: [
+          {
+            role: "system",
+            content: `You are EteFit, an expert AI fitness and health coach. You provide personalized, evidence-based advice on:
 - Workout programming (strength, cardio, flexibility, sport-specific)
 - Nutrition and meal planning
 - Recovery, sleep optimization, and stress management
 - Injury prevention and rehabilitation guidance
-- Habit building and motivation
-
+- Habit building and motivation.
 ${userProfile ? `USER PROFILE (use this to personalize all advice):
 - Height: ${userProfile.height ? userProfile.height + ' cm' : 'Not provided'}
 - Weight: ${userProfile.weight ? userProfile.weight + ' kg' : 'Not provided'}
@@ -100,43 +83,27 @@ Guidelines:
 - Always recommend consulting a healthcare professional for medical concerns.
 - Keep responses focused and well-structured with headers, lists, and tables when helpful.
 - Tailor advice based on the user's context from the conversation.`,
-            },
-            ...messages,
-          ],
-          stream: true,
-        }),
-      }
-    );
-
-    if (!response.ok) {
-      if (response.status === 429) {
-        return new Response(
-          JSON.stringify({ error: "Rate limit exceeded. Please try again in a moment." }),
-          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-      if (response.status === 402) {
-        return new Response(
-          JSON.stringify({ error: "AI usage limit reached. Please add credits." }),
-          { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-      const t = await response.text();
-      console.error("AI gateway error:", response.status, t);
-      return new Response(
-        JSON.stringify({ error: "AI service error" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    return new Response(response.body, {
-      headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
+          },
+          ...messages,
+        ],
+      }),
     });
-  } catch (e) {
+
+    const data = await response.json();
+
+    return {
+      statusCode: 200,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      body: JSON.stringify(data),
+    };
+  } catch (e: any) {
     console.error("chat error:", e);
-    return new Response(
-      JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return {
+      statusCode: 500,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      body: JSON.stringify({ error: e.message || "Unknown error" }),
+    };
   }
-});
+};
+
+export { handler };
