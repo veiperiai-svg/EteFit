@@ -32,7 +32,7 @@ const handler: Handler = async (event, context) => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "gpt-4",
+          model: "gpt-3.5-turbo",
           messages: [
             { role: "system", content: "Generate a short title (max 5 words). Return only the title." },
             { role: "user", content: convoSnippet },
@@ -58,7 +58,7 @@ const handler: Handler = async (event, context) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "gpt-4",
+        model: "gpt-3.5-turbo",
         messages: [
           {
             role: "system",
