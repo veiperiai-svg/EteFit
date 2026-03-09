@@ -98,7 +98,7 @@ const answer = data.choices?.[0]?.message?.content || "No answer from AI";
     return {
       statusCode: 200,
       headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
-      body: JSON.stringify(answer),
+      body: JSON.stringify({ answer }),
     };
   } catch (e: any) {
     console.error("chat error:", e);
