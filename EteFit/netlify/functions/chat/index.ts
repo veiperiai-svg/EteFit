@@ -91,7 +91,7 @@ Guidelines:
     });
 
     const data = await response.json();
-
+console.log("OpenAI API response:", data);
     return {
       statusCode: 200,
       headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
