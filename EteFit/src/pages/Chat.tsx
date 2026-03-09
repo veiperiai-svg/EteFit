@@ -80,7 +80,7 @@ async function streamChat({
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+    
     },
     body: JSON.stringify({ messages, userProfile }),
   });
@@ -319,7 +319,7 @@ const ChatInner = () => {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+            
           },
           body: JSON.stringify({
             generateTitle: true,
