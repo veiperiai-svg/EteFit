@@ -20,8 +20,8 @@ const handler: Handler = async (event) => {
       : {};
 
     // API key iš header arba env
-    const LOVABLE_API_KEY =
-      event.headers["apikey"] || process.env.LOVABLE_API_KEY;
+    const OPENROUTER_API_KEY =
+  event.headers["apikey"] || process.env.OPENROUTER_API_KEY;
     if (!LOVABLE_API_KEY) throw new Error("API key missing");
 
     // --- Title generation (quick non-streaming) ---
@@ -32,15 +32,17 @@ const handler: Handler = async (event) => {
         .join("\n");
 
       const titleResp = await fetch(
-        "https://ai.gateway.lovable.dev/v1/chat/completions",
+        "https://openrouter.ai/api/v1/chat/completions",
         {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${LOVABLE_API_KEY}`,
+            Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+"HTTP-Referer": "https://etefit.netlify.app,
+"X-Title": "EteFit AI Coach",
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            model: "google/gemini-2.5-flash-lite",
+            model: "openai/gpt-4.1-mini",
             messages: [
               {
                 role: "system",
@@ -78,15 +80,17 @@ const handler: Handler = async (event) => {
 
     // --- Normal chat ---
     const response = await fetch(
-      "https://ai.gateway.lovable.dev/v1/chat/completions",
+      "https://openrouter.ai/api/v1/chat/completions",
       {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${LOVABLE_API_KEY}`,
+          Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+"HTTP-Referer": "https://etefit.netlify.app",
+"X-Title": "EteFit AI Coach",
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "google/gemini-3-flash-preview",
+          model: "openai/gpt-4.1-mini",
           messages: [
             {
               role: "system",
