@@ -37,7 +37,7 @@ const handler: Handler = async (event) => {
           method: "POST",
           headers: {
             Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-"HTTP-Referer": "https://etefit.netlify.app,
+"HTTP-Referer": "https://etefit.netlify.app",
 "X-Title": "EteFit AI Coach",
             "Content-Type": "application/json",
           },
