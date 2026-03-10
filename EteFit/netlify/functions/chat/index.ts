@@ -42,7 +42,7 @@ const handler: Handler = async (event) => {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            model: "google/gemma-3-27b-it:free",
+            model: "stepfun/step-3.5-flash:free",
             messages: [
               {
                 role: "system",
@@ -90,7 +90,7 @@ const handler: Handler = async (event) => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "google/gemma-3-27b-it:free",
+          model: "stepfun/step-3.5-flash:free",
           messages: [
             {
               role: "system",
