@@ -22,7 +22,7 @@ const handler: Handler = async (event) => {
     // API key iš header arba env
     const OPENROUTER_API_KEY =
   event.headers["apikey"] || process.env.OPENROUTER_API_KEY;
-    if (!LOVABLE_API_KEY) throw new Error("API key missing");
+    if (!OPENROUTER_API_KEY) throw new Error("API key missing");
 
     // --- Title generation (quick non-streaming) ---
     if (generateTitle && messages?.length >= 2) {
