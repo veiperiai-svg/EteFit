@@ -32,7 +32,7 @@ const handler: Handler = async (event) => {
         .join("\n");
 
       const titleResp = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${GOOGLE_API_KEY}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GOOGLE_API_KEY}`,
         {
           method: "POST",
           headers: {
@@ -83,7 +83,7 @@ body: JSON.stringify({
 
     // --- Normal chat ---
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${GOOGLE_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GOOGLE_API_KEY}`,
        {
       method: "POST",
         headers: {
@@ -153,7 +153,6 @@ ${messages.map(m => `${m.role}: ${m.content}`).join("\n")}
         body: JSON.stringify({ error: "AI service error" }),
       };
     }
-
     // Streaming response
     return {
       statusCode: 200,
