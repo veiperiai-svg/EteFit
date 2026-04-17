@@ -20,8 +20,8 @@ const handler: Handler = async (event) => {
       : {};
 
     // API key iš header arba env
-    const GOOGLE_API_KEY =
-  event.headers["apikey"] || process.env.GOOGLE_API_KEY;
+    const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
+
     if (!GOOGLE_API_KEY) throw new Error("API key missing");
 
     // --- Title generation (quick non-streaming) ---
@@ -32,7 +32,7 @@ const handler: Handler = async (event) => {
         .join("\n");
 
       const titleResp = await fetch(
-        `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GOOGLE_API_KEY}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${GOOGLE_API_KEY}`,
         {
           method: "POST",
           headers: {
@@ -83,7 +83,7 @@ body: JSON.stringify({
 
     // --- Normal chat ---
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GOOGLE_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${GOOGLE_API_KEY}`,
        {
       method: "POST",
         headers: {
