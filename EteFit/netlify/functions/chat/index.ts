@@ -20,9 +20,9 @@ const handler: Handler = async (event) => {
       : {};
 
     // API key iš header arba env
-    const OPENROUTER_API_KEY =
-  event.headers["apikey"] || process.env.OPENROUTER_API_KEY;
-    if (!OPENROUTER_API_KEY) throw new Error("API key missing");
+    const GOOGLE_API_KEY =
+  event.headers["apikey"] || process.env.GOOGLE_API_KEY;
+    if (!GOOGLE_API_KEY) throw new Error("API key missing");
 
     // --- Title generation (quick non-streaming) ---
     if (generateTitle && messages?.length >= 2) {
@@ -32,17 +32,17 @@ const handler: Handler = async (event) => {
         .join("\n");
 
       const titleResp = await fetch(
-        "https://openrouter.ai/api/v1/chat/completions",
+        "https://generativelanguage.googleapis.com/v1/models/gemini-3.1-flash-lite:generateContent",
         {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+            Authorization: `Bearer ${GOOGLE_API_KEY}`,
 "HTTP-Referer": "https://etefit.netlify.app",
 "X-Title": "EteFit AI Coach",
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            model: "stepfun/step-3.5-flash:free",
+            model: "gemini-3.5-flash",
             messages: [
               {
                 role: "system",
@@ -80,17 +80,17 @@ const handler: Handler = async (event) => {
 
     // --- Normal chat ---
     const response = await fetch(
-      "https://openrouter.ai/api/v1/chat/completions",
+      "https://generativelanguage.googleapis.com/v1/models/gemini-3.1-flash-lite:generateContent",
       {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+          Authorization: `Bearer ${GOOGLE_API_KEY}`,
 "HTTP-Referer": "https://etefit.netlify.app",
 "X-Title": "EteFit AI Coach",
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "stepfun/step-3.5-flash:free",
+          model: "gemini-3.5-flash",
           messages: [
             {
               role: "system",
