@@ -32,7 +32,7 @@ const handler: Handler = async (event) => {
         .join("\n");
 
       const titleResp = await fetch(
-        "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${process.env.GOOGLE_API_KEY}",
+        `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GOOGLE_API_KEY}`,
         {
           method: "POST",
           headers: {
@@ -41,18 +41,21 @@ const handler: Handler = async (event) => {
 "X-Title": "EteFit AI Coach",
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({
-            model: "gemini-3.5-flash",
-            messages: [
-              {
-                role: "system",
-                content:
-                  "Generate a short title (max 5 words) for this fitness chat conversation. Return ONLY the title, nothing else. No quotes, no punctuation at the end.",
-              },
-              { role: "user", content: convoSnippet },
-            ],
-          }),
-        }
+body: JSON.stringify({
+  contents: [
+    {
+      role: "user",
+      parts: [
+        {
+          text:
+            "Generate a short title (max 5 words) for this fitness chat conversation. Return ONLY the title.\n\n" +
+            convoSnippet,
+        },
+      ],
+    },
+  ],
+}),
+}
       );
 
       if (!titleResp.ok) {
@@ -67,7 +70,7 @@ const handler: Handler = async (event) => {
 
       const titleData = await titleResp.json();
       const title =
-        titleData.choices?.[0]?.message?.content?.trim() ||
+        titleData.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
         messages[0]?.content?.slice(0, 40) ||
         "Chat";
 
@@ -80,9 +83,9 @@ const handler: Handler = async (event) => {
 
     // --- Normal chat ---
     const response = await fetch(
-      "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${process.env.GOOGLE_API_KEY}",
-      {
-        method: "POST",
+      `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GOOGLE_API_KEY}`,
+       {
+      method: "POST",
         headers: {
            // Authorization: Bearer token (nereikia Gemini)
 "HTTP-Referer": "https://etefit.netlify.app",
@@ -90,40 +93,45 @@ const handler: Handler = async (event) => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "gemini-3.5-flash",
-          messages: [
-            {
-              role: "system",
-              content: `You are EteFit, an expert AI fitness and health coach. You provide personalized, evidence-based advice on:
+  contents: [
+    {
+      role: "user",
+      parts: [
+        {
+          text: `
+You are EteFit, an expert AI fitness and health coach. You provide personalized, evidence-based advice on:
 - Workout programming (strength, cardio, flexibility, sport-specific)
 - Nutrition and meal planning
 - Recovery, sleep optimization, and stress management
 - Injury prevention and rehabilitation guidance
 - Habit building and motivation
 
-${
-  userProfile
-    ? `USER PROFILE (use this to personalize all advice):
-- Height: ${userProfile.height ? userProfile.height + " cm" : "Not provided"}
-- Weight: ${userProfile.weight ? userProfile.weight + " kg" : "Not provided"}
-- Age: ${userProfile.age ? userProfile.age + " years" : "Not provided"}
+${userProfile ? `
+USER PROFILE (use this to personalize all advice):
+- Height: ${userProfile.height || "Not provided"}
+- Weight: ${userProfile.weight || "Not provided"}
+- Age: ${userProfile.age || "Not provided"}
 - Activity level: ${userProfile.activity || "Not provided"}
-- Fitness goal: ${userProfile.goal || "Not provided"}`
-    : "No user profile provided — give general advice."
-}
-Guidelines:
-- Be encouraging but honest. Use markdown formatting for clarity.
-- Use emojis sparingly to keep things engaging.
-- Provide specific, actionable advice with sets, reps, durations when relevant.
-- Tailor advice based on user's context from the conversation.`,
-            },
-            ...messages,
-          ],
-          stream: true,
-        }),
-      }
-    );
+- Fitness goal: ${userProfile.goal || "Not provided"}
+` : "No user profile provided — give general advice."}
 
+GUIDELINES:
+- Be encouraging but honest
+- Use markdown formatting for clarity
+- Use emojis sparingly
+- Provide specific sets, reps, durations when relevant
+- Tailor advice based on conversation
+
+CONVERSATION:
+${messages.map(m => `${m.role}: ${m.content}`).join("\n")}
+          `.trim()
+        }
+      ]
+    }
+  ]
+  })
+  }
+);
     if (!response.ok) {
       if (response.status === 429)
         return {
