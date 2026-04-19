@@ -30,7 +30,6 @@ const handler: Handler = async (event) => {
         .map((m: any) => `${m.role}: ${m.content.slice(0, 200)}`)
         .join("\n");
 
-      // PAKEITIMAS: v1beta -> v1
       const titleResp = await fetch(
         `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GOOGLE_API_KEY}`,
         {
@@ -79,11 +78,6 @@ const handler: Handler = async (event) => {
     }
 
     // --- Normal chat ---
-    const formattedMessages = messages.map((m: any) => ({
-      role: m.role === "assistant" ? "model" : "user",
-      parts: [{ text: m.content }],
-    }));
-
     const systemPrompt = `
 You are EteFit, an expert AI fitness and health coach. You provide personalized, evidence-based advice on:
 - Workout programming (strength, cardio, flexibility, sport-specific)
@@ -108,8 +102,18 @@ GUIDELINES:
 - Provide specific sets, reps, durations when relevant
 - Tailor advice based on conversation`.trim();
 
-    // PAKEITIMAS: v1beta -> v1 IR streamGenerateContent -> generateContent
-    // (Standartinės Netlify funkcijos nepalaiko streaming'o, todėl naudojame paprastą generavimą)
+    // PAKEITIMAS: Gemini rolių formatavimas
+    const formattedMessages = messages.map((m: any) => ({
+      role: m.role === "assistant" ? "model" : "user",
+      parts: [{ text: m.content }],
+    }));
+
+    // ESMINIS PAKEITIMAS: Kadangi system_instruction meta 400 klaidą,
+    // mes įkeliame systemPrompt į patį pirmą žinutės tekstą.
+    if (formattedMessages.length > 0 && formattedMessages[0].role === 'user') {
+      formattedMessages[0].parts[0].text = `INSTRUCTIONS: ${systemPrompt}\n\nUSER MESSAGE: ${formattedMessages[0].parts[0].text}`;
+    }
+
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GOOGLE_API_KEY}`,
       {
@@ -118,10 +122,7 @@ GUIDELINES:
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          system_instruction: {
-            parts: [{ text: systemPrompt }]
-          },
-          contents: formattedMessages
+          contents: formattedMessages // system_instruction laukas pašalintas, nes jis meta klaidą
         }),
       }
     );
@@ -136,7 +137,6 @@ GUIDELINES:
       };
     }
 
-    // PAKEITIMAS: Duomenų išgavimas iš JSON atsakymo vietoje body srauto
     const data = await response.json();
     const aiText = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
 
