@@ -22,6 +22,14 @@ const handler: Handler = async (event) => {
     const generateTitle = body.generateTitle;
 
     const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY?.trim();
+    
+      console.log("--- DEBUG INFORMACIJA ---");
+    console.log("Raktas Netlify nustatymuose:", GOOGLE_API_KEY ? "RASTAS" : "NERASTAS");
+    if (GOOGLE_API_KEY) {
+      console.log("Rakto pradžia (pirmi 6 simboliai):", GOOGLE_API_KEY.substring(0, 6));
+    }
+    console.log("--------------------------");
+
     if (!GOOGLE_API_KEY) throw new Error("API key missing");
 
     // PAKEITIMAS 2: Naudojame v1beta ir gemini-1.5-flash (šis derinys stabiliausias nemokamiems raktams)
