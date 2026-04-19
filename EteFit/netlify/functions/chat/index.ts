@@ -15,29 +15,30 @@ const handler: Handler = async (event) => {
   }
 
   try {
-    // PAKEITIMAS 1: Saugus duomenų išpakavimas (apsaugo nuo "TypeError: map" klaidos)
+    // 1. Saugus duomenų išpakavimas
     const body = event.body ? JSON.parse(event.body) : {};
     const messages = body.messages || []; 
     const userProfile = body.userProfile;
     const generateTitle = body.generateTitle;
 
+    // 2. API rakto paėmimas ir debug
     const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY?.trim();
     
-      console.log("--- DEBUG INFORMACIJA ---");
+    console.log("--- DEBUG INFORMACIJA ---");
     console.log("Raktas Netlify nustatymuose:", GOOGLE_API_KEY ? "RASTAS" : "NERASTAS");
     if (GOOGLE_API_KEY) {
-      console.log("Rakto pradžia (pirmi 6 simboliai):", GOOGLE_API_KEY.substring(0, 6));
+      console.log("Rakto pradžia:", GOOGLE_API_KEY.substring(0, 6));
     }
     console.log("--------------------------");
 
     if (!GOOGLE_API_KEY) throw new Error("API key missing");
 
-    // PAKEITIMAS 2: Naudojame v1beta ir gemini-1.5-flash (šis derinys stabiliausias nemokamiems raktams)
+    // 3. NAUDOJAME STABILŲ gemini-1.5-flash per v1 API
     const MODEL_ID = "gemini-1.5-flash";
-    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_ID}:generateContent?key=${GOOGLE_API_KEY}`;
+    const API_URL = `https://generativelanguage.googleapis.com/v1/models/${MODEL_ID}:generateContent?key=${GOOGLE_API_KEY}`;
 
-    // --- Title generation ---
-    if (generateTitle && messages.length >= 2) {
+    // --- TITLE GENERATION DALIS ---
+    if (generateTitle && messages.length >= 1) {
       const convoSnippet = messages
         .slice(0, 4)
         .map((m: any) => `${m.role}: ${m.content.slice(0, 200)}`)
@@ -49,7 +50,7 @@ const handler: Handler = async (event) => {
         body: JSON.stringify({
           contents: [{
             role: "user",
-            parts: [{ text: "Generate a short title (max 5 words) for this chat conversation:\n\n" + convoSnippet }]
+            parts: [{ text: "Generate a short title (max 5 words) for this fitness chat conversation. Return ONLY the title:\n\n" + convoSnippet }]
           }],
         }),
       });
@@ -65,13 +66,22 @@ const handler: Handler = async (event) => {
       }
     }
 
-    // --- Normal chat ---
-    // PAKEITIMAS 3: Gemini rolių formatavimas (assistant -> model)
+    // --- PAGRINDINIS CHAT (PERSONA IR INSTRUKCIJOS) ---
+    if (messages.length === 0) {
+      return {
+        statusCode: 200,
+        headers: corsHeaders,
+        body: JSON.stringify({ text: "Sveiki! Aš esu EteFit. Kaip galiu padėti jūsų sporto kelyje šiandien?" }),
+      };
+    }
+
+    // Gemini reikalauja rolių: user ir model
     const formattedMessages = messages.map((m: any) => ({
       role: m.role === "assistant" ? "model" : "user",
       parts: [{ text: m.content || "" }],
     }));
 
+    // IŠSAMIOS INSTRUKCIJOS (PERSONA)
     const systemPrompt = `
 You are EteFit, an expert AI fitness and health coach. You provide personalized, evidence-based advice on:
 - Workout programming (strength, cardio, flexibility, sport-specific)
@@ -81,22 +91,28 @@ You are EteFit, an expert AI fitness and health coach. You provide personalized,
 - Habit building and motivation
 
 ${userProfile ? `
-USER PROFILE:
+USER PROFILE (use this to personalize all advice):
 - Height: ${userProfile.height || "Not provided"}
 - Weight: ${userProfile.weight || "Not provided"}
 - Age: ${userProfile.age || "Not provided"}
 - Activity level: ${userProfile.activity || "Not provided"}
 - Fitness goal: ${userProfile.goal || "Not provided"}
-` : "No user profile provided."}
+` : "No user profile provided — give general advice."}
 
-GUIDELINES: Be encouraging, use markdown, emojis sparingly.`.trim();
+GUIDELINES:
+- Be encouraging but honest
+- Use markdown formatting for clarity
+- Use emojis sparingly
+- Provide specific sets, reps, durations when relevant
+- Tailor advice based on conversation`.trim();
 
-    // Įdedame instrukciją į pirmąją user žinutę (išvengiame 400 klaidos)
-    if (formattedMessages.length > 0 && formattedMessages[0].role === 'user') {
-      formattedMessages[0].parts[0].text = `SYSTEM INSTRUCTIONS: ${systemPrompt}\n\nUSER MESSAGE: ${formattedMessages[0].parts[0].text}`;
+    // Įdedame instrukciją į pačią pirmąją vartotojo žinutę
+    if (formattedMessages[0].role === 'user') {
+      formattedMessages[0].parts[0].text = `SYSTEM INSTRUCTIONS (ACT AS THIS PERSONA): ${systemPrompt}\n\nUSER MESSAGE: ${formattedMessages[0].parts[0].text}`;
     }
 
-    // PAKEITIMAS 4: Užklausa be streaming (kad Netlify Functions veiktų patikimai)
+    console.log("Siunčiama užklausa į Google API (v1 stable)...");
+    
     const response = await fetch(API_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -107,7 +123,7 @@ GUIDELINES: Be encouraging, use markdown, emojis sparingly.`.trim();
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("AI gateway error:", response.status, errorText);
+      console.error("Google API Klaida:", response.status, errorText);
       return {
         statusCode: response.status,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -116,9 +132,8 @@ GUIDELINES: Be encouraging, use markdown, emojis sparingly.`.trim();
     }
 
     const data = await response.json();
-    const aiText = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const aiText = data.candidates?.[0]?.content?.parts?.[0]?.text || "Atsiprašau, įvyko klaida generuojant atsakymą.";
 
-    // Grąžiname atsakymą JSON formatu
     return {
       statusCode: 200,
       headers: { 
@@ -127,8 +142,9 @@ GUIDELINES: Be encouraging, use markdown, emojis sparingly.`.trim();
       },
       body: JSON.stringify({ text: aiText }),
     };
+    
   } catch (e: any) {
-    console.error("chat error:", e);
+    console.error("Chat klaida:", e);
     return {
       statusCode: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
