@@ -30,8 +30,9 @@ const handler: Handler = async (event) => {
         .map((m: any) => `${m.role}: ${m.content.slice(0, 200)}`)
         .join("\n");
 
+      // PAKEITIMAS: v1beta -> v1
       const titleResp = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GOOGLE_API_KEY}`,
+        `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GOOGLE_API_KEY}`,
         {
           method: "POST",
           headers: {
@@ -77,14 +78,12 @@ const handler: Handler = async (event) => {
       };
     }
 
-    // --- Normal chat (Streaming enabled) ---
-    // ESMINIS PAKEITIMAS 1: Gemini reikalauja "user" ir "model" rolių
+    // --- Normal chat ---
     const formattedMessages = messages.map((m: any) => ({
       role: m.role === "assistant" ? "model" : "user",
       parts: [{ text: m.content }],
     }));
 
-    // ESMINIS PAKEITIMAS 2: Persona perkelta į system_instruction
     const systemPrompt = `
 You are EteFit, an expert AI fitness and health coach. You provide personalized, evidence-based advice on:
 - Workout programming (strength, cardio, flexibility, sport-specific)
@@ -109,8 +108,10 @@ GUIDELINES:
 - Provide specific sets, reps, durations when relevant
 - Tailor advice based on conversation`.trim();
 
+    // PAKEITIMAS: v1beta -> v1 IR streamGenerateContent -> generateContent
+    // (Standartinės Netlify funkcijos nepalaiko streaming'o, todėl naudojame paprastą generavimą)
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:streamGenerateContent?alt=sse&key=${GOOGLE_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GOOGLE_API_KEY}`,
       {
         method: "POST",
         headers: {
@@ -135,15 +136,17 @@ GUIDELINES:
       };
     }
 
+    // PAKEITIMAS: Duomenų išgavimas iš JSON atsakymo vietoje body srauto
+    const data = await response.json();
+    const aiText = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+
     return {
       statusCode: 200,
       headers: { 
         ...corsHeaders, 
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        "Connection": "keep-alive"
+        "Content-Type": "application/json"
       },
-      body: response.body as any,
+      body: JSON.stringify({ text: aiText }),
     };
   } catch (e: any) {
     console.error("chat error:", e);
