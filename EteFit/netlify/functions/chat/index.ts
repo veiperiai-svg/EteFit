@@ -19,12 +19,15 @@ const handler: Handler = async (event) => {
       ? JSON.parse(event.body)
       : {};
 
-    const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
+    // Pridėtas .trim(), kad netyčia neatsirastų tarpų
+    const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY?.trim();
 
     if (!GOOGLE_API_KEY) throw new Error("API key missing");
 
-    // ESMINIS PAKEITIMAS 1: Naudojame gemini-pro, nes 1.5 Flash nemokamame/ES lygmenyje dažnai meta 404
-    const MODEL_ID = "gemini-pro";
+    // PAKEITIMAS 1: Naudojame naują, stabilų modelį
+    const MODEL_ID = "gemini-1.5-flash";
+    // PAKEITIMAS 2: Naudojame v1 (stabilią) versiją vietoje v1beta
+    const API_BASE_URL = `https://generativelanguage.googleapis.com/v1/models/${MODEL_ID}:generateContent?key=${GOOGLE_API_KEY}`;
 
     // --- Title generation (quick non-streaming) ---
     if (generateTitle && messages?.length >= 2) {
@@ -33,29 +36,26 @@ const handler: Handler = async (event) => {
         .map((m: any) => `${m.role}: ${m.content.slice(0, 200)}`)
         .join("\n");
 
-      const titleResp = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_ID}:generateContent?key=${GOOGLE_API_KEY}`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            contents: [
-              {
-                role: "user",
-                parts: [
-                  {
-                    text:
-                      "Generate a short title (max 5 words) for this fitness chat conversation. Return ONLY the title.\n\n" +
-                      convoSnippet,
-                  },
-                ],
-              },
-            ],
-          }),
-        }
-      );
+      const titleResp = await fetch(API_BASE_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: "user",
+              parts: [
+                {
+                  text:
+                    "Generate a short title (max 5 words) for this fitness chat conversation. Return ONLY the title.\n\n" +
+                    convoSnippet,
+                },
+              ],
+            },
+          ],
+        }),
+      });
 
       if (!titleResp.ok) {
         return {
@@ -110,25 +110,21 @@ GUIDELINES:
 - Provide specific sets, reps, durations when relevant
 - Tailor advice based on conversation`.trim();
 
-    // ESMINIS PAKEITIMAS 2: Kadangi system_instruction meta 400 klaidą,
-    // instrukcijas įdedame į pačią pirmąją vartotojo žinutę.
+    // Instrukcijas įdedame į pačią pirmąją vartotojo žinutę
     if (formattedMessages.length > 0 && formattedMessages[0].role === 'user') {
       formattedMessages[0].parts[0].text = `INSTRUCTIONS FOR AI: ${systemPrompt}\n\nUSER MESSAGE: ${formattedMessages[0].parts[0].text}`;
     }
 
-    // ESMINIS PAKEITIMAS 3: Naudojame generateContent (nebe stream), kad Netlify funkcija veiktų stabiliai
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_ID}:generateContent?key=${GOOGLE_API_KEY}`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          contents: formattedMessages
-        }),
-      }
-    );
+    // Naudojame tą patį API_BASE_URL (v1 versija)
+    const response = await fetch(API_BASE_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        contents: formattedMessages
+      }),
+    });
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -136,7 +132,7 @@ GUIDELINES:
       return {
         statusCode: response.status,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
-        body: JSON.stringify({ error: "AI service error" }),
+        body: JSON.stringify({ error: "AI service error", details: errorText }),
       };
     }
 
@@ -149,7 +145,7 @@ GUIDELINES:
         ...corsHeaders, 
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({ text: aiText }), // Frontend paims text reikšmę
+      body: JSON.stringify({ text: aiText }),
     };
   } catch (e: any) {
     console.error("chat error:", e);
