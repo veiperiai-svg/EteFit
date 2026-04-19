@@ -23,6 +23,9 @@ const handler: Handler = async (event) => {
 
     if (!GOOGLE_API_KEY) throw new Error("API key missing");
 
+    // ESMINIS PAKEITIMAS 1: Naudojame gemini-pro, nes 1.5 Flash nemokamame/ES lygmenyje dažnai meta 404
+    const MODEL_ID = "gemini-pro";
+
     // --- Title generation (quick non-streaming) ---
     if (generateTitle && messages?.length >= 2) {
       const convoSnippet = messages
@@ -31,7 +34,7 @@ const handler: Handler = async (event) => {
         .join("\n");
 
       const titleResp = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GOOGLE_API_KEY}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_ID}:generateContent?key=${GOOGLE_API_KEY}`,
         {
           method: "POST",
           headers: {
@@ -77,7 +80,7 @@ const handler: Handler = async (event) => {
       };
     }
 
-    // --- Normal chat (Streaming disabled for compatibility) ---
+    // --- Normal chat ---
     const formattedMessages = messages.map((m: any) => ({
       role: m.role === "assistant" ? "model" : "user",
       parts: [{ text: m.content }],
@@ -107,14 +110,15 @@ GUIDELINES:
 - Provide specific sets, reps, durations when relevant
 - Tailor advice based on conversation`.trim();
 
-    // PAKEITIMAS: Įdedame systemPrompt į pirmąją user žinutę, kad išvengtume 400 klaidos
+    // ESMINIS PAKEITIMAS 2: Kadangi system_instruction meta 400 klaidą,
+    // instrukcijas įdedame į pačią pirmąją vartotojo žinutę.
     if (formattedMessages.length > 0 && formattedMessages[0].role === 'user') {
-      formattedMessages[0].parts[0].text = `INSTRUCTIONS: ${systemPrompt}\n\nUSER MESSAGE: ${formattedMessages[0].parts[0].text}`;
+      formattedMessages[0].parts[0].text = `INSTRUCTIONS FOR AI: ${systemPrompt}\n\nUSER MESSAGE: ${formattedMessages[0].parts[0].text}`;
     }
 
-    // PAKEITIMAS: v1beta + generateContent (nebe stream)
+    // ESMINIS PAKEITIMAS 3: Naudojame generateContent (nebe stream), kad Netlify funkcija veiktų stabiliai
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GOOGLE_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_ID}:generateContent?key=${GOOGLE_API_KEY}`,
       {
         method: "POST",
         headers: {
@@ -136,7 +140,6 @@ GUIDELINES:
       };
     }
 
-    // PAKEITIMAS: Išgauname tekstą iš JSON, nes nebe naudojame streaming
     const data = await response.json();
     const aiText = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
 
@@ -146,7 +149,7 @@ GUIDELINES:
         ...corsHeaders, 
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({ text: aiText }), // Frontend gaus objektą su { text: "atsakymas" }
+      body: JSON.stringify({ text: aiText }), // Frontend paims text reikšmę
     };
   } catch (e: any) {
     console.error("chat error:", e);
