@@ -31,7 +31,7 @@ const handler: Handler = async (event) => {
         .join("\n");
 
       const titleResp = await fetch(
-        `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GOOGLE_API_KEY}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GOOGLE_API_KEY}`,
         {
           method: "POST",
           headers: {
@@ -77,7 +77,12 @@ const handler: Handler = async (event) => {
       };
     }
 
-    // --- Normal chat ---
+    // --- Normal chat (Streaming disabled for compatibility) ---
+    const formattedMessages = messages.map((m: any) => ({
+      role: m.role === "assistant" ? "model" : "user",
+      parts: [{ text: m.content }],
+    }));
+
     const systemPrompt = `
 You are EteFit, an expert AI fitness and health coach. You provide personalized, evidence-based advice on:
 - Workout programming (strength, cardio, flexibility, sport-specific)
@@ -102,27 +107,21 @@ GUIDELINES:
 - Provide specific sets, reps, durations when relevant
 - Tailor advice based on conversation`.trim();
 
-    // PAKEITIMAS: Gemini rolių formatavimas
-    const formattedMessages = messages.map((m: any) => ({
-      role: m.role === "assistant" ? "model" : "user",
-      parts: [{ text: m.content }],
-    }));
-
-    // ESMINIS PAKEITIMAS: Kadangi system_instruction meta 400 klaidą,
-    // mes įkeliame systemPrompt į patį pirmą žinutės tekstą.
+    // PAKEITIMAS: Įdedame systemPrompt į pirmąją user žinutę, kad išvengtume 400 klaidos
     if (formattedMessages.length > 0 && formattedMessages[0].role === 'user') {
       formattedMessages[0].parts[0].text = `INSTRUCTIONS: ${systemPrompt}\n\nUSER MESSAGE: ${formattedMessages[0].parts[0].text}`;
     }
 
+    // PAKEITIMAS: v1beta + generateContent (nebe stream)
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GOOGLE_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GOOGLE_API_KEY}`,
       {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          contents: formattedMessages // system_instruction laukas pašalintas, nes jis meta klaidą
+          contents: formattedMessages
         }),
       }
     );
@@ -137,6 +136,7 @@ GUIDELINES:
       };
     }
 
+    // PAKEITIMAS: Išgauname tekstą iš JSON, nes nebe naudojame streaming
     const data = await response.json();
     const aiText = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
 
@@ -146,7 +146,7 @@ GUIDELINES:
         ...corsHeaders, 
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({ text: aiText }),
+      body: JSON.stringify({ text: aiText }), // Frontend gaus objektą su { text: "atsakymas" }
     };
   } catch (e: any) {
     console.error("chat error:", e);
