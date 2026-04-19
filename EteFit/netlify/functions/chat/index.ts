@@ -78,21 +78,14 @@ const handler: Handler = async (event) => {
     }
 
     // --- Normal chat (Streaming enabled) ---
-    // Pakeista į :streamGenerateContent?alt=sse, kad veiktų streamingas
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:streamGenerateContent?alt=sse&key=${GOOGLE_API_KEY}`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          contents: [
-            {
-              role: "user",
-              parts: [
-                {
-                  text: `
+    // ESMINIS PAKEITIMAS 1: Gemini reikalauja "user" ir "model" rolių
+    const formattedMessages = messages.map((m: any) => ({
+      role: m.role === "assistant" ? "model" : "user",
+      parts: [{ text: m.content }],
+    }));
+
+    // ESMINIS PAKEITIMAS 2: Persona perkelta į system_instruction
+    const systemPrompt = `
 You are EteFit, an expert AI fitness and health coach. You provide personalized, evidence-based advice on:
 - Workout programming (strength, cardio, flexibility, sport-specific)
 - Nutrition and meal planning
@@ -114,15 +107,20 @@ GUIDELINES:
 - Use markdown formatting for clarity
 - Use emojis sparingly
 - Provide specific sets, reps, durations when relevant
-- Tailor advice based on conversation
+- Tailor advice based on conversation`.trim();
 
-CONVERSATION:
-${messages.map((m: any) => `${m.role}: ${m.content}`).join("\n")}
-          `.trim(),
-                },
-              ],
-            },
-          ],
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:streamGenerateContent?alt=sse&key=${GOOGLE_API_KEY}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          system_instruction: {
+            parts: [{ text: systemPrompt }]
+          },
+          contents: formattedMessages
         }),
       }
     );
@@ -137,7 +135,6 @@ ${messages.map((m: any) => `${m.role}: ${m.content}`).join("\n")}
       };
     }
 
-    // Gražiname stream tiesiai į front-end
     return {
       statusCode: 200,
       headers: { 
