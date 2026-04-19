@@ -19,7 +19,6 @@ const handler: Handler = async (event) => {
       ? JSON.parse(event.body)
       : {};
 
-    // API key iš header arba env
     const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
 
     if (!GOOGLE_API_KEY) throw new Error("API key missing");
@@ -32,30 +31,27 @@ const handler: Handler = async (event) => {
         .join("\n");
 
       const titleResp = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${GOOGLE_API_KEY}`,
+        `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${GOOGLE_API_KEY}`,
         {
           method: "POST",
           headers: {
-            // Authorization: Bearer token (nereikia Gemini)
-"HTTP-Referer": "https://etefit.netlify.app",
-"X-Title": "EteFit AI Coach",
             "Content-Type": "application/json",
           },
-body: JSON.stringify({
-  contents: [
-    {
-      role: "user",
-      parts: [
-        {
-          text:
-            "Generate a short title (max 5 words) for this fitness chat conversation. Return ONLY the title.\n\n" +
-            convoSnippet,
-        },
-      ],
-    },
-  ],
-}),
-}
+          body: JSON.stringify({
+            contents: [
+              {
+                role: "user",
+                parts: [
+                  {
+                    text:
+                      "Generate a short title (max 5 words) for this fitness chat conversation. Return ONLY the title.\n\n" +
+                      convoSnippet,
+                  },
+                ],
+              },
+            ],
+          }),
+        }
       );
 
       if (!titleResp.ok) {
@@ -81,24 +77,22 @@ body: JSON.stringify({
       };
     }
 
-    // --- Normal chat ---
+    // --- Normal chat (Streaming enabled) ---
+    // Pakeista į :streamGenerateContent?alt=sse, kad veiktų streamingas
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${GOOGLE_API_KEY}`,
-       {
-      method: "POST",
+      `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:streamGenerateContent?alt=sse&key=${GOOGLE_API_KEY}`,
+      {
+        method: "POST",
         headers: {
-           // Authorization: Bearer token (nereikia Gemini)
-"HTTP-Referer": "https://etefit.netlify.app",
-"X-Title": "EteFit AI Coach",
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-  contents: [
-    {
-      role: "user",
-      parts: [
-        {
-          text: `
+          contents: [
+            {
+              role: "user",
+              parts: [
+                {
+                  text: `
 You are EteFit, an expert AI fitness and health coach. You provide personalized, evidence-based advice on:
 - Workout programming (strength, cardio, flexibility, sport-specific)
 - Nutrition and meal planning
@@ -123,42 +117,36 @@ GUIDELINES:
 - Tailor advice based on conversation
 
 CONVERSATION:
-${messages.map(m => `${m.role}: ${m.content}`).join("\n")}
-          `.trim()
-        }
-      ]
-    }
-  ]
-  })
-  }
-);
+${messages.map((m: any) => `${m.role}: ${m.content}`).join("\n")}
+          `.trim(),
+                },
+              ],
+            },
+          ],
+        }),
+      }
+    );
+
     if (!response.ok) {
-      if (response.status === 429)
-        return {
-          statusCode: 429,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-          body: JSON.stringify({ error: "Rate limit exceeded. Try later." }),
-        };
-      if (response.status === 402)
-        return {
-          statusCode: 402,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-          body: JSON.stringify({ error: "AI usage limit reached. Add credits." }),
-        };
-      const t = await response.text();
-      console.error("AI gateway error:", response.status, t);
+      const errorText = await response.text();
+      console.error("AI gateway error:", response.status, errorText);
       return {
-        statusCode: 500,
+        statusCode: response.status,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
         body: JSON.stringify({ error: "AI service error" }),
       };
     }
 
-    // Streaming response
+    // Gražiname stream tiesiai į front-end
     return {
       statusCode: 200,
-      headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
-      body: response.body as any, // Node.js fetch Response.body
+      headers: { 
+        ...corsHeaders, 
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive"
+      },
+      body: response.body as any,
     };
   } catch (e: any) {
     console.error("chat error:", e);
