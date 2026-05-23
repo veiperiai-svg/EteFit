@@ -6,8 +6,6 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const wait = (ms: number) => new Promise(res => setTimeout(res, ms));
-
 export const handler: Handler = async (event) => {
   if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: corsHeaders, body: "" };
 
@@ -16,15 +14,10 @@ export const handler: Handler = async (event) => {
     const { messages = [], userProfile, generateTitle } = body;
     const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY?.trim();
 
-    if (!GOOGLE_API_KEY) throw new Error("API key missing");
+    if (!GOOGLE_API_KEY) throw new Error("API KEY MISSING");
 
-    /**
-     * 2026 m. GEGUŽĖS STATUSAS:
-     * - gemini-1.5-flash: IŠJUNGTAS (Shut down)
-     * - gemini-2.0-flash: STABILUS (Rekomenduojamas nemokamam planui)
-     * - gemini-3.5-flash: NAUJAS (Gali būti ribojamas nemokamiems vartotojams)
-     */
-    const MODEL_ID = "gemini-2.0-flash"; 
+    // NAUDOJAME MODELĮ IŠ TAVO GRAFIKO
+    const MODEL_ID = "gemini-3.5-flash"; 
     const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_ID}:generateContent?key=${GOOGLE_API_KEY}`;
 
     // --- TAVO IŠSAMIOS INSTRUKCIJOS (PERSONA) ---
@@ -37,7 +30,7 @@ You are EteFit, an expert AI fitness and health coach. You provide personalized,
 - Habit building and motivation
 
 ${userProfile ? `
-USER PROFILE:
+USER PROFILE (use this to personalize all advice):
 - Height: ${userProfile.height || "Not provided"}
 - Weight: ${userProfile.weight || "Not provided"}
 - Age: ${userProfile.age || "Not provided"}
@@ -51,63 +44,75 @@ GUIDELINES:
 - Use emojis sparingly
 - Provide specific sets, reps, durations when relevant
 - Tailor advice based on conversation
-- IMPORTANT: If asked for medical diagnosis, suggest professional medical consultation.`.trim();
+- IMPORTANT: If asked for medical diagnosis, remind the user you are an AI coach and suggest professional medical consultation.`.trim();
 
-    // --- PAGRINDINIS POKALBIS ---
-    if (messages.length === 0 && !generateTitle) {
-      return {
-        statusCode: 200,
-        headers: corsHeaders,
-        body: JSON.stringify({ text: "Sveiki! Aš esu EteFit. Kaip galiu padėti?" }),
-      };
-    }
-
-    let contents = messages.map((m: any) => ({
-      role: m.role === "assistant" ? "model" : "user",
-      parts: [{ text: m.content || "" }],
-    }));
-    if (contents.length > 0 && contents[0].role !== "user") contents.shift();
-
-    // --- RETRY LOGIKA (Sprendžia 429 klaidą) ---
-    let response;
-    let data;
-    let retries = 0;
-    const maxRetries = 1;
-
-    while (retries <= maxRetries) {
-      console.log(`[DEBUG] Bandymas ${retries + 1} su ${MODEL_ID}...`);
-      
-      response = await fetch(API_URL, {
+    // --- TITLE GENERATION (Tik jei prašoma atskirai) ---
+    if (generateTitle) {
+      const lastMsg = messages[messages.length - 1]?.content || "New Chat";
+      const titleResp = await fetch(API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          system_instruction: { parts: [{ text: systemPrompt }] },
-          contents: generateTitle ? [{ role: "user", parts: [{ text: "Generate 3-5 word title for this: " + messages[messages.length-1].content }] }] : contents,
-          safetySettings: [
-            { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_ONLY_HIGH" },
-            { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_ONLY_HIGH" },
-            { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_ONLY_HIGH" },
-            { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_ONLY_HIGH" },
-          ],
-          generationConfig: { temperature: 0.7, maxOutputTokens: 1000 }
-        }),
+          contents: [{ role: "user", parts: [{ text: "3 word title for: " + lastMsg }] }],
+          generationConfig: { maxOutputTokens: 10 }
+        })
       });
-
-      data = await response.json();
-      if (response.status === 429) {
-        await wait(2000);
-        retries++;
-      } else {
-        break;
-      }
+      const tData = await titleResp.json();
+      return {
+        statusCode: 200,
+        headers: corsHeaders,
+        body: JSON.stringify({ title: tData.candidates?.[0]?.content?.parts?.[0]?.text || "Chat" })
+      };
     }
 
-    if (!response || !response.ok) {
-      const errorMsg = response?.status === 429 ? "Viršyti limitai. Palaukite 1 min." : (data.error?.message || "API Error");
+    // --- PAGRINDINIS CHAT ---
+    if (messages.length === 0) {
       return {
-        statusCode: response?.status || 500,
+        statusCode: 200,
         headers: corsHeaders,
-        body: JSON.stringify({ error: errorMsg }),
+        body: JSON.stringify({ text: "Sveiki! Aš esu EteFit. Kaip galiu padėti jūsų sporto kelyje šiandien?" }),
+      };
+    }
+
+    // Gemini reikalauja user/model sekos. Siunčiame tik paskutines 8 žinutes (taupome Tokenus).
+    let contents = messages.slice(-8).map((m: any) => ({
+      role: m.role === "assistant" ? "model" : "user",
+      parts: [{ text: m.content || "" }],
+    }));
+
+    if (contents[0].role !== "user") contents.shift();
+
+    const response = await fetch(API_URL, {
+      method: "POST",
+      headers: { 
+        "Content-Type": "application/json",
+        "x-goog-api-revision": "2026-05-20"
+      },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: systemPrompt }] },
+        contents: contents,
+        generationConfig: { temperature: 0.7, maxOutputTokens: 1024 }
+      }),
+    });
+
+    const data = await response.json();
+
+    // Jei gauname 429 klaidą (kaip tavo nuotraukoje)
+    if (response.status === 429) {
+      return {
+        statusCode: 200,
+        headers: corsHeaders,
+        body: JSON.stringify({ 
+          text: "⚠️ EteFit šiuo metu pasiekė nemokamos versijos limitą (429 Too Many Requests). Google leidžia tik kelias užklausas per minutę. Prašome palaukti 60 sekundžių." 
+        }),
+      };
+    }
+
+    if (!response.ok) {
+      return {
+        statusCode: response.status,
+        headers: corsHeaders,
+        body: JSON.stringify({ error: data.error?.message || "API Klaida" }),
       };
     }
 
@@ -116,7 +121,7 @@ GUIDELINES:
     return {
       statusCode: 200,
       headers: corsHeaders,
-      body: JSON.stringify(generateTitle ? { title: aiText } : { text: aiText }),
+      body: JSON.stringify({ text: aiText }),
     };
 
   } catch (e: any) {
