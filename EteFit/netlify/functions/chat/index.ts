@@ -34,7 +34,7 @@ const handler: Handler = async (event) => {
     if (!GOOGLE_API_KEY) throw new Error("API key missing");
 
     // 3. NAUDOJAME STABILŲ gemini-1.5-flash per v1 API
-    const MODEL_ID = "gemini-1.5-flash";
+    const MODEL_ID = "gemini-3.5-flash";
     const API_URL = `https://generativelanguage.googleapis.com/v1/models/${MODEL_ID}:generateContent?key=${GOOGLE_API_KEY}`;
 
     // --- TITLE GENERATION DALIS ---
