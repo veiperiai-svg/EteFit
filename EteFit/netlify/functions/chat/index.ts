@@ -4,27 +4,33 @@ const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version, x-goog-api-revision",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
 const handler: Handler = async (event) => {
+  // 1. CORS Preflight
   if (event.httpMethod === "OPTIONS") {
-    return { statusCode: 200, headers: corsHeaders, body: "" };
+    return {
+      statusCode: 200,
+      headers: corsHeaders,
+      body: "",
+    };
   }
 
   try {
+    // 2. Duomenų paruošimas
     const body = event.body ? JSON.parse(event.body) : {};
-    const messages = body.messages || []; 
-    const userProfile = body.userProfile;
-    const generateTitle = body.generateTitle;
+    const { messages = [], userProfile, generateTitle } = body;
 
     const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY?.trim();
     if (!GOOGLE_API_KEY) throw new Error("API key missing");
 
-    // 2026 m. gegužės STANDARTAS
-    const MODEL_ID = "gemini-3.5-flash";
+    // 2026 m. gegužės nustatymai
+    // Naudojame v1beta, nes ji šiuo metu stabiliausiai priima system_instruction
+    const MODEL_ID = "gemini-3.5-flash"; 
     const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_ID}:generateContent?key=${GOOGLE_API_KEY}`;
 
-    // --- IŠSAMIOS INSTRUKCIJOS (JŪSŲ PERSONA) ---
+    // --- IŠSAMIOS INSTRUKCIJOS (PERSONA) ---
     const systemPrompt = `
 You are EteFit, an expert AI fitness and health coach. You provide personalized, evidence-based advice on:
 - Workout programming (strength, cardio, flexibility, sport-specific)
@@ -49,26 +55,26 @@ GUIDELINES:
 - Provide specific sets, reps, durations when relevant
 - Tailor advice based on conversation`.trim();
 
-    // --- TITLE GENERATION DALIS ---
+    // --- TITLE GENERATION LOGIKA ---
     if (generateTitle && messages.length >= 1) {
-      const convoSnippet = messages.slice(0, 4).map((m: any) => `${m.role}: ${m.content.slice(0, 200)}`).join("\n");
+      const convoSnippet = messages.slice(0, 3).map((m: any) => `${m.role}: ${m.content}`).join("\n");
       const titleResp = await fetch(API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          contents: [{ role: "user", parts: [{ text: "Generate a short title (max 5 words) for this chat conversation. Return ONLY the title:\n\n" + convoSnippet }] }],
+          contents: [{ role: "user", parts: [{ text: "Generate a short title (max 5 words) for this chat. Return ONLY the title text:\n\n" + convoSnippet }] }],
         }),
       });
-      if (titleResp.ok) {
-        const titleData = await titleResp.json();
-        return {
-          statusCode: 200,
-          headers: corsHeaders,
-          body: JSON.stringify({ title: titleData.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "Chat" }),
-        };
-      }
+      const titleData = await titleResp.json();
+      const title = titleData.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "Naujas pokalbis";
+      return {
+        statusCode: 200,
+        headers: corsHeaders,
+        body: JSON.stringify({ title }),
+      };
     }
 
+    // --- PAGRINDINIS CHAT ---
     if (messages.length === 0) {
       return {
         statusCode: 200,
@@ -77,28 +83,28 @@ GUIDELINES:
       };
     }
 
-    // Formatuojame žinutes (user / model seka)
-    const formattedMessages = messages.map((m: any) => ({
+    // Gemini reikalauja griežtos user/model sekos
+    let formattedMessages = messages.map((m: any) => ({
       role: m.role === "assistant" ? "model" : "user",
       parts: [{ text: m.content || "" }],
     }));
 
-    // Saugiklis: pirma žinutė visada turi būti 'user'
+    // Saugiklis: pirma žinutė PRIVALO būti 'user'
     if (formattedMessages.length > 0 && formattedMessages[0].role !== "user") {
       formattedMessages.shift();
     }
 
-    console.log(`Siunčiama užklausa į Gemini 3.5 Flash...`);
+    console.log(`[DEBUG] Siunčiama užklausa į Gemini 3.5 Flash...`);
 
     const response = await fetch(API_URL, {
       method: "POST",
       headers: { 
         "Content-Type": "application/json",
-        "x-goog-api-revision": "2026-05-20" // Kritiškai svarbu 2026 m. stabilumui
+        "x-goog-api-revision": "2026-05-20" // 2026 m. stabilumo garantas
       },
       body: JSON.stringify({
         system_instruction: {
-          parts: [{ text: systemPrompt }] // JŪSŲ INSTRUKCIJOS ĮDĖTOS ČIA
+          parts: [{ text: systemPrompt }]
         },
         contents: formattedMessages,
         generationConfig: {
@@ -110,16 +116,27 @@ GUIDELINES:
 
     const data = await response.json();
 
+    // Jei Google grąžina klaidą (pvz. 503 arba 400)
     if (!response.ok) {
-      console.error("Google API Klaida:", data);
+      console.error("[DEBUG] Google API Error:", JSON.stringify(data));
       return {
         statusCode: response.status,
         headers: corsHeaders,
-        body: JSON.stringify({ error: "AI service error", details: data.error?.message }),
+        body: JSON.stringify({ error: data.error?.message || "AI API Error" }),
       };
     }
 
-    const aiText = data.candidates?.[0]?.content?.parts?.[0]?.text || "Atsiprašau, įvyko klaida generuojant atsakymą.";
+    // Patikra, ar gavome atsakymą (kad nebūtų begalinio krovimo)
+    const aiText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+    if (!aiText) {
+      console.error("[DEBUG] Tuščias atsakymas. Kandidatai:", JSON.stringify(data.candidates));
+      return {
+        statusCode: 200,
+        headers: corsHeaders,
+        body: JSON.stringify({ text: "Atsiprašau, negaliu sugeneruoti atsakymo dėl saugumo filtrų. Pabandykite perklausti kitaip." }),
+      };
+    }
 
     return {
       statusCode: 200,
@@ -128,11 +145,11 @@ GUIDELINES:
     };
 
   } catch (e: any) {
-    console.error("Chat klaida:", e);
+    console.error("[DEBUG] Kritinė klaida:", e);
     return {
       statusCode: 500,
       headers: corsHeaders,
-      body: JSON.stringify({ error: e.message || "Unknown error" }),
+      body: JSON.stringify({ error: e.message || "Unknown server error" }),
     };
   }
 };
