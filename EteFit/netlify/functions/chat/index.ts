@@ -8,7 +8,7 @@ const corsHeaders = {
 };
 
 const handler: Handler = async (event) => {
-  // 1. CORS Preflight
+  // 1. CORS Preflight (Būtina naršyklei)
   if (event.httpMethod === "OPTIONS") {
     return {
       statusCode: 200,
@@ -25,12 +25,15 @@ const handler: Handler = async (event) => {
     const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY?.trim();
     if (!GOOGLE_API_KEY) throw new Error("API key missing");
 
-    // 2026 m. gegužės nustatymai
-    // Naudojame v1beta, nes ji šiuo metu stabiliausiai priima system_instruction
+    /** 
+     * MODELIO PARINKIMAS (2026 m. Gegužė)
+     * Jei gemini-3.5-flash meta 404, Google tikriausiai reikalauja specifinės versijos.
+     * Naudojame stabiliausią šios dienos ID.
+     */
     const MODEL_ID = "gemini-3.5-flash"; 
     const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_ID}:generateContent?key=${GOOGLE_API_KEY}`;
 
-    // --- IŠSAMIOS INSTRUKCIJOS (PERSONA) ---
+    // --- TAVO IŠSAMIOS INSTRUKCIJOS (PERSONA) ---
     const systemPrompt = `
 You are EteFit, an expert AI fitness and health coach. You provide personalized, evidence-based advice on:
 - Workout programming (strength, cardio, flexibility, sport-specific)
@@ -55,26 +58,36 @@ GUIDELINES:
 - Provide specific sets, reps, durations when relevant
 - Tailor advice based on conversation`.trim();
 
-    // --- TITLE GENERATION LOGIKA ---
+    // --- TITLE GENERATION DALIS ---
     if (generateTitle && messages.length >= 1) {
-      const convoSnippet = messages.slice(0, 3).map((m: any) => `${m.role}: ${m.content}`).join("\n");
+      const convoSnippet = messages
+        .slice(0, 4)
+        .map((m: any) => `${m.role}: ${m.content.slice(0, 200)}`)
+        .join("\n");
+
       const titleResp = await fetch(API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          contents: [{ role: "user", parts: [{ text: "Generate a short title (max 5 words) for this chat. Return ONLY the title text:\n\n" + convoSnippet }] }],
+          contents: [{
+            role: "user",
+            parts: [{ text: "Generate a short title (max 5 words) for this fitness chat conversation. Return ONLY the title text:\n\n" + convoSnippet }]
+          }],
         }),
       });
-      const titleData = await titleResp.json();
-      const title = titleData.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "Naujas pokalbis";
-      return {
-        statusCode: 200,
-        headers: corsHeaders,
-        body: JSON.stringify({ title }),
-      };
+
+      if (titleResp.ok) {
+        const titleData = await titleResp.json();
+        const title = titleData.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "Chat";
+        return {
+          statusCode: 200,
+          headers: corsHeaders,
+          body: JSON.stringify({ title }),
+        };
+      }
     }
 
-    // --- PAGRINDINIS CHAT ---
+    // --- PAGRINDINIS POKALBIS ---
     if (messages.length === 0) {
       return {
         statusCode: 200,
@@ -83,24 +96,24 @@ GUIDELINES:
       };
     }
 
-    // Gemini reikalauja griežtos user/model sekos
+    // Formatuojame žinutes (Gemini reikalauja: user -> model -> user)
     let formattedMessages = messages.map((m: any) => ({
       role: m.role === "assistant" ? "model" : "user",
       parts: [{ text: m.content || "" }],
     }));
 
-    // Saugiklis: pirma žinutė PRIVALO būti 'user'
+    // Užtikriname, kad seka prasidėtų nuo vartotojo (user)
     if (formattedMessages.length > 0 && formattedMessages[0].role !== "user") {
       formattedMessages.shift();
     }
 
-    console.log(`[DEBUG] Siunčiama užklausa į Gemini 3.5 Flash...`);
-
+    console.log(`[DEBUG] Kreipiamės į Google API (${MODEL_ID})...`);
+    
     const response = await fetch(API_URL, {
       method: "POST",
       headers: { 
         "Content-Type": "application/json",
-        "x-goog-api-revision": "2026-05-20" // 2026 m. stabilumo garantas
+        "x-goog-api-revision": "2026-05-20" // Reikalaujama 2026 m. gegužės mėnesį
       },
       body: JSON.stringify({
         system_instruction: {
@@ -109,32 +122,34 @@ GUIDELINES:
         contents: formattedMessages,
         generationConfig: {
           temperature: 0.7,
-          maxOutputTokens: 2048
-        }
+          maxOutputTokens: 2048,
+        },
       }),
     });
 
     const data = await response.json();
 
-    // Jei Google grąžina klaidą (pvz. 503 arba 400)
+    // Jei gauname 404 arba bet kokią kitą klaidą iš Google
     if (!response.ok) {
-      console.error("[DEBUG] Google API Error:", JSON.stringify(data));
+      console.error("[DEBUG] Google API Klaida:", JSON.stringify(data));
       return {
         statusCode: response.status,
         headers: corsHeaders,
-        body: JSON.stringify({ error: data.error?.message || "AI API Error" }),
+        body: JSON.stringify({ 
+          error: "Model error", 
+          details: data.error?.message || "Check if model ID is correct for May 2026." 
+        }),
       };
     }
 
-    // Patikra, ar gavome atsakymą (kad nebūtų begalinio krovimo)
+    // Paimame AI tekstą
     const aiText = data.candidates?.[0]?.content?.parts?.[0]?.text;
 
     if (!aiText) {
-      console.error("[DEBUG] Tuščias atsakymas. Kandidatai:", JSON.stringify(data.candidates));
       return {
         statusCode: 200,
         headers: corsHeaders,
-        body: JSON.stringify({ text: "Atsiprašau, negaliu sugeneruoti atsakymo dėl saugumo filtrų. Pabandykite perklausti kitaip." }),
+        body: JSON.stringify({ text: "Atsiprašau, bet negaliu sugeneruoti atsakymo. Bandykite dar kartą." }),
       };
     }
 
@@ -145,11 +160,11 @@ GUIDELINES:
     };
 
   } catch (e: any) {
-    console.error("[DEBUG] Kritinė klaida:", e);
+    console.error("[DEBUG] Serverio klaida:", e);
     return {
       statusCode: 500,
       headers: corsHeaders,
-      body: JSON.stringify({ error: e.message || "Unknown server error" }),
+      body: JSON.stringify({ error: e.message || "Unknown error" }),
     };
   }
 };
