@@ -3,85 +3,28 @@ import { Handler } from "@netlify/functions";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version, x-goog-api-revision",
 };
 
 const handler: Handler = async (event) => {
   if (event.httpMethod === "OPTIONS") {
-    return {
-      statusCode: 200,
-      headers: corsHeaders,
-    };
+    return { statusCode: 200, headers: corsHeaders, body: "" };
   }
 
   try {
-    // 1. Saugus duomenų išpakavimas
     const body = event.body ? JSON.parse(event.body) : {};
     const messages = body.messages || []; 
     const userProfile = body.userProfile;
     const generateTitle = body.generateTitle;
 
-    // 2. API rakto paėmimas ir debug
     const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY?.trim();
-    
-    console.log("--- DEBUG INFORMACIJA ---");
-    console.log("Raktas Netlify nustatymuose:", GOOGLE_API_KEY ? "RASTAS" : "NERASTAS");
-    if (GOOGLE_API_KEY) {
-      console.log("Rakto pradžia:", GOOGLE_API_KEY.substring(0, 6));
-    }
-    console.log("--------------------------");
-
     if (!GOOGLE_API_KEY) throw new Error("API key missing");
 
-    // 3. NAUDOJAME STABILŲ gemini-1.5-flash per v1 API
+    // 2026 m. gegužės STANDARTAS
     const MODEL_ID = "gemini-3.5-flash";
-    const API_URL = `https://generativelanguage.googleapis.com/v1/models/${MODEL_ID}:generateContent?key=${GOOGLE_API_KEY}`;
+    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_ID}:generateContent?key=${GOOGLE_API_KEY}`;
 
-    // --- TITLE GENERATION DALIS ---
-    if (generateTitle && messages.length >= 1) {
-      const convoSnippet = messages
-        .slice(0, 4)
-        .map((m: any) => `${m.role}: ${m.content.slice(0, 200)}`)
-        .join("\n");
-
-      const titleResp = await fetch(API_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{
-            role: "user",
-            parts: [{ text: "Generate a short title (max 5 words) for this fitness chat conversation. Return ONLY the title:\n\n" + convoSnippet }]
-          }],
-        }),
-      });
-
-      if (titleResp.ok) {
-        const titleData = await titleResp.json();
-        const title = titleData.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "Chat";
-        return {
-          statusCode: 200,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-          body: JSON.stringify({ title }),
-        };
-      }
-    }
-
-    // --- PAGRINDINIS CHAT (PERSONA IR INSTRUKCIJOS) ---
-    if (messages.length === 0) {
-      return {
-        statusCode: 200,
-        headers: corsHeaders,
-        body: JSON.stringify({ text: "Sveiki! Aš esu EteFit. Kaip galiu padėti jūsų sporto kelyje šiandien?" }),
-      };
-    }
-
-    // Gemini reikalauja rolių: user ir model
-    const formattedMessages = messages.map((m: any) => ({
-      role: m.role === "assistant" ? "model" : "user",
-      parts: [{ text: m.content || "" }],
-    }));
-
-    // IŠSAMIOS INSTRUKCIJOS (PERSONA)
+    // --- IŠSAMIOS INSTRUKCIJOS (JŪSŲ PERSONA) ---
     const systemPrompt = `
 You are EteFit, an expert AI fitness and health coach. You provide personalized, evidence-based advice on:
 - Workout programming (strength, cardio, flexibility, sport-specific)
@@ -106,48 +49,89 @@ GUIDELINES:
 - Provide specific sets, reps, durations when relevant
 - Tailor advice based on conversation`.trim();
 
-    // Įdedame instrukciją į pačią pirmąją vartotojo žinutę
-    if (formattedMessages[0].role === 'user') {
-      formattedMessages[0].parts[0].text = `SYSTEM INSTRUCTIONS (ACT AS THIS PERSONA): ${systemPrompt}\n\nUSER MESSAGE: ${formattedMessages[0].parts[0].text}`;
+    // --- TITLE GENERATION DALIS ---
+    if (generateTitle && messages.length >= 1) {
+      const convoSnippet = messages.slice(0, 4).map((m: any) => `${m.role}: ${m.content.slice(0, 200)}`).join("\n");
+      const titleResp = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: "Generate a short title (max 5 words) for this chat conversation. Return ONLY the title:\n\n" + convoSnippet }] }],
+        }),
+      });
+      if (titleResp.ok) {
+        const titleData = await titleResp.json();
+        return {
+          statusCode: 200,
+          headers: corsHeaders,
+          body: JSON.stringify({ title: titleData.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "Chat" }),
+        };
+      }
     }
 
-    console.log("Siunčiama užklausa į Google API (v1 stable)...");
-    
-    const response = await fetch(API_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: formattedMessages
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("Google API Klaida:", response.status, errorText);
+    if (messages.length === 0) {
       return {
-        statusCode: response.status,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-        body: JSON.stringify({ error: "AI service error", details: errorText }),
+        statusCode: 200,
+        headers: corsHeaders,
+        body: JSON.stringify({ text: "Sveiki! Aš esu EteFit. Kaip galiu padėti jūsų sporto kelyje šiandien?" }),
       };
     }
 
+    // Formatuojame žinutes (user / model seka)
+    const formattedMessages = messages.map((m: any) => ({
+      role: m.role === "assistant" ? "model" : "user",
+      parts: [{ text: m.content || "" }],
+    }));
+
+    // Saugiklis: pirma žinutė visada turi būti 'user'
+    if (formattedMessages.length > 0 && formattedMessages[0].role !== "user") {
+      formattedMessages.shift();
+    }
+
+    console.log(`Siunčiama užklausa į Gemini 3.5 Flash...`);
+
+    const response = await fetch(API_URL, {
+      method: "POST",
+      headers: { 
+        "Content-Type": "application/json",
+        "x-goog-api-revision": "2026-05-20" // Kritiškai svarbu 2026 m. stabilumui
+      },
+      body: JSON.stringify({
+        system_instruction: {
+          parts: [{ text: systemPrompt }] // JŪSŲ INSTRUKCIJOS ĮDĖTOS ČIA
+        },
+        contents: formattedMessages,
+        generationConfig: {
+          temperature: 0.7,
+          maxOutputTokens: 2048
+        }
+      }),
+    });
+
     const data = await response.json();
+
+    if (!response.ok) {
+      console.error("Google API Klaida:", data);
+      return {
+        statusCode: response.status,
+        headers: corsHeaders,
+        body: JSON.stringify({ error: "AI service error", details: data.error?.message }),
+      };
+    }
+
     const aiText = data.candidates?.[0]?.content?.parts?.[0]?.text || "Atsiprašau, įvyko klaida generuojant atsakymą.";
 
     return {
       statusCode: 200,
-      headers: { 
-        ...corsHeaders, 
-        "Content-Type": "application/json"
-      },
+      headers: corsHeaders,
       body: JSON.stringify({ text: aiText }),
     };
-    
+
   } catch (e: any) {
     console.error("Chat klaida:", e);
     return {
       statusCode: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: corsHeaders,
       body: JSON.stringify({ error: e.message || "Unknown error" }),
     };
   }
